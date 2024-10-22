@@ -517,7 +517,8 @@ class MatMul4Bit(torch.autograd.Function):
 
         # 1. Dequantize
         # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+        print("*******quant_state absmax: ", quant_state.absmax)
+        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype), bias)
 
         # 3. Save state
         ctx.state = quant_state
@@ -548,7 +549,7 @@ class MatMul4Bit(torch.autograd.Function):
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
-            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
+            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
 
         return grad_A, grad_B, None, grad_bias, None
 
@@ -575,6 +576,7 @@ def matmul_4bit(
     bias=None,
 ):
     assert quant_state is not None
+    #  or A.device.type == "xpu"
     if (A.numel() == A.shape[-1] or A.device.type == "cpu") and A.requires_grad == False:
         # CPU backend does not require A to be a vector
         if A.shape[-1] % quant_state.blocksize != 0:
@@ -586,9 +588,11 @@ def matmul_4bit(
             if getattr(quant_state, "ipex", False):
                 out = F.gemv_4bit(A, B, out, state=quant_state)
             else:
+                print("^^^^^^^^^no grad gemv path^^^^^^^^^")
                 out = F.gemv_4bit(A, B.t(), out, state=quant_state)
             if bias is not None:
                 out += bias
             return out
     else:
+        print("^^^^^^^^^grad seperate path^^^^^^^^^")
         return MatMul4Bit.apply(A, B, out, bias, quant_state)
